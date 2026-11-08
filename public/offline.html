@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3f2563">
+  <title>Lumera</title>
+  <style>
+    body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f9f6f1;color:#1b1427;text-align:center}
+    main{max-width:420px}h1{font-size:1.5rem;margin:.5rem 0}p{color:#5d5568;line-height:1.5}
+    button{margin-top:16px;min-height:44px;padding:0 20px;border:0;border-radius:12px;background:#3f2563;color:#fff;font:600 1rem system-ui;cursor:pointer}
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/icons/icon-192.png" width="72" height="72" alt="">
+    <h1 id="t">Немає з'єднання</h1>
+    <p id="b">Бронювання та оплата потребують інтернету. Відновіть з'єднання й спробуйте ще раз.</p>
+    <button id="r" onclick="location.reload()">Спробувати ще раз</button>
+  </main>
+  <script>
+    if (!(navigator.language || '').toLowerCase().startsWith('uk')) {
+      document.documentElement.lang = 'en';
+      document.getElementById('t').textContent = 'You are offline';
+      document.getElementById('b').textContent = 'Booking and payments need an internet connection. Reconnect and try again.';
+      document.getElementById('r').textContent = 'Try again';
+    }
+  </script>
+</body>
+</html>
