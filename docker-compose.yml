@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lumera
+      POSTGRES_PASSWORD: lumera
+      POSTGRES_DB: lumera
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lumera"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  # Optional: run the app in a container. For local development prefer `npm run dev`.
+  app:
+    build: .
+    profiles: ["app"]
+    depends_on:
+      db: { condition: service_healthy }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://lumera:lumera@db:5432/lumera?schema=public
+    ports: ["3000:3000"]
+volumes:
+  pgdata:
