@@ -1,0 +1,61 @@
+{
+  "app": { "name": "Lumera", "tagline": "Find and book beauty specialists, tattoo artists and studios" },
+  "common": {
+    "language": "Language",
+    "loading": "Loading…",
+    "retry": "Try again",
+    "close": "Close",
+    "save": "Save",
+    "cancel": "Cancel",
+    "skipToContent": "Skip to content"
+  },
+  "nav": { "home": "Home", "designSystem": "Design system" },
+  "footer": { "rights": "All rights reserved." },
+  "pwa": {
+    "install": "Install app",
+    "installTitle": "Install Lumera",
+    "installBody": "Add Lumera to your home screen for quick access.",
+    "iosHint": "On iPhone/iPad: tap Share, then “Add to Home Screen”.",
+    "dismiss": "Not now"
+  },
+  "offline": {
+    "title": "You are offline",
+    "body": "Booking and payments need an internet connection. Reconnect and try again."
+  },
+  "status": {
+    "badge": "Stage 1 — Foundation",
+    "title": "Platform foundation is ready",
+    "body": "Database schema, roles & permissions, billing maths, i18n, design system and PWA shell are in place. The catalog, search and booking arrive in the next stages.",
+    "dbLabel": "Database",
+    "dbOk": "connected",
+    "dbDown": "not reachable — check DATABASE_URL",
+    "next": "Next: catalog, search and public profiles (Stage 2)"
+  },
+  "ds": {
+    "title": "Design system",
+    "subtitle": "Tokens and components shared by every page.",
+    "buttons": "Buttons",
+    "inputs": "Fields",
+    "feedback": "Feedback & states",
+    "cards": "Cards",
+    "emailLabel": "E-mail",
+    "emailPlaceholder": "name@example.com",
+    "emailError": "Enter a valid e-mail address",
+    "primary": "Primary",
+    "secondary": "Secondary",
+    "ghost": "Ghost",
+    "danger": "Danger",
+    "loadingBtn": "Saving…",
+    "toast": "Show notification",
+    "toastBody": "Your changes were saved.",
+    "alertInfo": "Informational message",
+    "alertError": "Something went wrong. Please try again.",
+    "alertSuccess": "Done! Everything worked.",
+    "sampleCardTitle": "Sample specialist card",
+    "sampleCardBody": "Large portfolio photo, rating, price and the nearest slot will live here."
+  },
+  "plan": {
+    "interval": { "month": "month" },
+    "seats": { "one": "{count} active master", "few": "{count} active masters", "many": "{count} active masters", "other": "{count} active masters" }
+  }
+}
