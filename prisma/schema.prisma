@@ -1,0 +1,844 @@
+// Lumera — beauty marketplace. Single schema for ALL stages (1–4).
+// Conventions:
+//  * ids: cuid strings. Money: integer minor units (kopiyky/cents) + ISO currency code.
+//  * all timestamps are UTC; display timezone comes from City / User.
+//  * DB-only integrity rules (no-overlap bookings, owner checks) live in
+//    prisma/manual/0001_integrity_constraints.sql — apply with `npm run db:constraints`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum PlatformRole {
+  CLIENT
+  MASTER
+  STUDIO_OWNER
+  SUPER_ADMIN
+}
+
+enum StudioRole {
+  OWNER
+  ADMIN
+  MASTER
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  DELETED
+}
+
+enum ProfileStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  SUSPENDED
+}
+
+enum MemberStatus {
+  ACTIVE
+  ENDED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  REVOKED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum ModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED_BY_CLIENT
+  CANCELLED_BY_PROVIDER
+  COMPLETED
+  NO_SHOW
+}
+
+enum ReviewStatus {
+  PENDING
+  PUBLISHED
+  REJECTED
+}
+
+enum AvailabilityType {
+  BLOCKED // day off / vacation / sick day
+  EXTRA // extra working window outside the weekly template
+}
+
+enum PlanKind {
+  INDIVIDUAL
+  STUDIO
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
+enum SubscriberType {
+  USER
+  STUDIO
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE // chosen, first payment not confirmed yet
+  ACTIVE
+  PAST_DUE // renewal failed, retrying
+  GRACE // grace period: features limited, profile still visible
+  CANCELLED // cancel_at_period_end reached or cancelled
+  EXPIRED
+}
+
+enum PaymentProviderCode {
+  TEST
+  STRIPE
+  LIQPAY
+  WAYFORPAY
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentKind {
+  SUBSCRIPTION
+  STUDIO_BASE
+  STUDIO_SEATS
+  CONNECTION_FEE
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum TokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+// ───────────────────────────── Users & auth ─────────────────────────────
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  passwordHash    String?
+  firstName       String
+  lastName        String
+  phone           String?
+  avatarUrl       String?
+  locale          String     @default("uk")
+  timezone        String     @default("Europe/Kyiv")
+  status          UserStatus @default(ACTIVE)
+  emailVerifiedAt DateTime?
+  lastLoginAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  roles               UserRole[]
+  sessions            Session[]
+  tokens              AuthToken[]
+  masterProfile       MasterProfile?
+  ownedStudios        StudioProfile[]    @relation("StudioOwner")
+  studioMemberships   StudioMember[]
+  invitationsSent     StudioInvitation[] @relation("InvitationSender")
+  invitationsReceived StudioInvitation[] @relation("InvitationRecipient")
+  bookingsAsClient    Booking[]          @relation("BookingClient")
+  reviews             Review[]
+  favorites           Favorite[]
+  notifications       Notification[]
+  paymentMethods      PaymentMethod[]
+  subscriptions       Subscription[]
+  payments            Payment[]
+  auditLogs           AuditLog[]
+
+  @@index([status])
+}
+
+model UserRole {
+  id        String       @id @default(cuid())
+  userId    String
+  role      PlatformRole
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique // sha256 of the cookie token — raw token is never stored
+  userAgent  String?
+  ip         String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuthToken {
+  id         String    @id @default(cuid())
+  userId     String
+  type       TokenType
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+// ───────────────────────────── Geo & i18n ─────────────────────────────
+
+model Country {
+  id        String   @id @default(cuid())
+  code      String   @unique // ISO 3166-1 alpha-2
+  slug      String   @unique
+  name      String // canonical (English) name; localized names live in Translation
+  currency  String   @default("UAH")
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  cities    City[]
+  addresses Address[]
+}
+
+model City {
+  id         String   @id @default(cuid())
+  countryId  String
+  slug       String
+  name       String
+  timezone   String   @default("Europe/Kyiv")
+  latitude   Float?
+  longitude  Float?
+  isPopular  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  country    Country  @relation(fields: [countryId], references: [id])
+  districts  District[]
+  addresses  Address[]
+  masters    MasterProfile[]
+  studios    StudioProfile[]
+
+  @@unique([countryId, slug])
+  @@index([slug])
+}
+
+model District {
+  id     String @id @default(cuid())
+  cityId String
+  slug   String
+  name   String
+  city   City   @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  addresses Address[]
+
+  @@unique([cityId, slug])
+}
+
+model Address {
+  id         String    @id @default(cuid())
+  countryId  String
+  cityId     String
+  districtId String?
+  line1      String
+  line2      String?
+  postalCode String?
+  latitude   Float?
+  longitude  Float?
+  country    Country   @relation(fields: [countryId], references: [id])
+  city       City      @relation(fields: [cityId], references: [id])
+  district   District? @relation(fields: [districtId], references: [id])
+  masters    MasterProfile[]
+  studios    StudioProfile[]
+  branches   StudioBranch[]
+
+  @@index([cityId, districtId])
+}
+
+// Admin-managed UI languages / currencies: adding one is a DB row + a messages/<code>.json file.
+model Language {
+  code      String  @id // "uk", "en", "pl" …
+  name      String // native name
+  isActive  Boolean @default(false)
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+}
+
+model Currency {
+  code      String  @id // ISO 4217
+  symbol    String
+  decimals  Int     @default(2)
+  isActive  Boolean @default(false)
+  sortOrder Int     @default(0)
+}
+
+// Generic translations for database content (category, city, district names, CMS blocks…).
+model Translation {
+  id         String   @id @default(cuid())
+  entityType String // "category" | "subcategory" | "city" | "district" | "country" | "cms"
+  entityId   String
+  field      String // "name" | "description" | …
+  locale     String
+  value      String
+  updatedAt  DateTime @updatedAt
+
+  @@unique([entityType, entityId, field, locale])
+  @@index([entityType, locale])
+}
+
+// ───────────────────────────── Catalog taxonomy ─────────────────────────────
+
+model Category {
+  id            String   @id @default(cuid())
+  slug          String   @unique // "tattoo", "manicure" … used in URLs
+  name          String
+  icon          String? // lucide icon name
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+  subcategories Subcategory[]
+  masters       MasterCategory[]
+  services      Service[]
+  studios       StudioCategory[]
+  portfolio     PortfolioItem[]
+}
+
+model Subcategory {
+  id         String   @id @default(cuid())
+  categoryId String
+  slug       String
+  name       String
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  services   Service[]
+
+  @@unique([categoryId, slug])
+}
+
+// ───────────────────────────── Master profiles ─────────────────────────────
+
+model MasterProfile {
+  id                String        @id @default(cuid())
+  userId            String        @unique
+  slug              String        @unique // /master/<slug>
+  displayName       String
+  headline          String?
+  bio               String?
+  experienceSince   Int? // year the master started — "years of experience" is derived
+  gender            String? // only exposed publicly if showGender = true
+  showGender        Boolean       @default(false)
+  cityId            String
+  addressId         String?
+  workAreaNote      String? // "Center, by appointment"
+  avatarUrl         String?
+  coverUrl          String?
+  contactEmail      String?
+  contactPhone      String?
+  socials           Json? // { instagram, telegram, tiktok, website … }
+  status            ProfileStatus @default(DRAFT)
+  publishedAt       DateTime?
+  acceptsBookings   Boolean       @default(true)
+  allowMultiStudio  Boolean       @default(true)
+  ratingAvg         Decimal       @default(0) @db.Decimal(3, 2)
+  ratingCount       Int           @default(0)
+  bookingCount      Int           @default(0) // popularity signal for sorting
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  city       City             @relation(fields: [cityId], references: [id])
+  address    Address?         @relation(fields: [addressId], references: [id])
+  categories MasterCategory[]
+  portfolio  PortfolioItem[]
+  services   Service[]
+  hours      WorkingHours[]
+  exceptions Availability[]
+  memberships StudioMember[]
+  bookings   Booking[]
+  reviews    Review[]
+  favorites  Favorite[]
+
+  @@index([cityId, status])
+  @@index([status, ratingAvg])
+}
+
+model MasterCategory {
+  masterId   String
+  categoryId String
+  master     MasterProfile @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  category   Category      @relation(fields: [categoryId], references: [id])
+
+  @@id([masterId, categoryId])
+}
+
+// ───────────────────────────── Studios ─────────────────────────────
+
+model StudioProfile {
+  id           String        @id @default(cuid())
+  ownerId      String
+  slug         String        @unique // /studio/<slug>
+  name         String
+  description  String?
+  logoUrl      String?
+  coverUrl     String?
+  cityId       String
+  addressId    String?
+  email        String?
+  phone        String?
+  socials      Json?
+  status       ProfileStatus @default(DRAFT)
+  publishedAt  DateTime?
+  ratingAvg    Decimal       @default(0) @db.Decimal(3, 2)
+  ratingCount  Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  owner       User               @relation("StudioOwner", fields: [ownerId], references: [id])
+  city        City               @relation(fields: [cityId], references: [id])
+  address     Address?           @relation(fields: [addressId], references: [id])
+  branches    StudioBranch[]
+  members     StudioMember[]
+  invitations StudioInvitation[]
+  categories  StudioCategory[]
+  services    Service[]
+  photos      StudioPhoto[]
+  bookings    Booking[]
+  reviews     Review[]
+  favorites   Favorite[]
+  subscriptions Subscription[]
+  payments    Payment[]
+  paymentMethods PaymentMethod[]
+
+  @@index([cityId, status])
+}
+
+model StudioCategory {
+  studioId   String
+  categoryId String
+  studio     StudioProfile @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  category   Category      @relation(fields: [categoryId], references: [id])
+
+  @@id([studioId, categoryId])
+}
+
+model StudioPhoto {
+  id        String        @id @default(cuid())
+  studioId  String
+  url       String
+  caption   String?
+  sortOrder Int           @default(0)
+  studio    StudioProfile @relation(fields: [studioId], references: [id], onDelete: Cascade)
+}
+
+model StudioBranch {
+  id        String        @id @default(cuid())
+  studioId  String
+  name      String
+  addressId String
+  phone     String?
+  isMain    Boolean       @default(false)
+  isActive  Boolean       @default(true)
+  studio    StudioProfile @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  address   Address       @relation(fields: [addressId], references: [id])
+  members   StudioMember[]
+  hours     WorkingHours[]
+  bookings  Booking[]
+}
+
+// One row per (studio, user) for the WHOLE history. Re-joining re-activates the same row,
+// so `connectionFeePaidAt` guarantees the one-time 99 UAH fee is never charged twice.
+// A master may have ACTIVE rows in several studios (if MasterProfile.allowMultiStudio).
+model StudioMember {
+  id                 String        @id @default(cuid())
+  studioId           String
+  userId             String
+  masterId           String? // MasterProfile of the member, if they work as a master
+  role               StudioRole    @default(MASTER)
+  status             MemberStatus  @default(ACTIVE)
+  branchId           String?
+  countsAsSeat       Boolean       @default(true) // billable "active master" seat
+  portfolioConsent   Boolean       @default(false) // master allows the studio to upload to their portfolio
+  connectionFeePaidAt DateTime?
+  joinedAt           DateTime      @default(now())
+  leftAt             DateTime?
+
+  studio StudioProfile  @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  user   User           @relation(fields: [userId], references: [id])
+  master MasterProfile? @relation(fields: [masterId], references: [id])
+  branch StudioBranch?  @relation(fields: [branchId], references: [id])
+
+  @@unique([studioId, userId])
+  @@index([userId, status])
+  @@index([studioId, status])
+}
+
+model StudioInvitation {
+  id          String           @id @default(cuid())
+  studioId    String
+  invitedById String
+  email       String
+  userId      String? // filled when the e-mail matches an existing account
+  role        StudioRole       @default(MASTER)
+  branchId    String?
+  tokenHash   String           @unique
+  status      InvitationStatus @default(PENDING)
+  expiresAt   DateTime
+  respondedAt DateTime?
+  createdAt   DateTime         @default(now())
+
+  studio    StudioProfile @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  invitedBy User          @relation("InvitationSender", fields: [invitedById], references: [id])
+  user      User?         @relation("InvitationRecipient", fields: [userId], references: [id])
+
+  @@index([studioId, status])
+  @@index([email])
+}
+
+// ───────────────────────────── Portfolio ─────────────────────────────
+
+model PortfolioItem {
+  id               String           @id @default(cuid())
+  masterId         String
+  categoryId       String?
+  type             MediaType        @default(IMAGE)
+  url              String
+  thumbUrl         String?
+  caption          String?
+  width            Int?
+  height           Int?
+  sortOrder        Int              @default(0)
+  uploadedByUserId String // master themselves or a studio admin (needs consent)
+  moderation       ModerationStatus @default(APPROVED)
+  createdAt        DateTime         @default(now())
+
+  master   MasterProfile @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  category Category?     @relation(fields: [categoryId], references: [id])
+
+  @@index([masterId, sortOrder])
+  @@index([moderation])
+}
+
+// ───────────────────────────── Services & pricing ─────────────────────────────
+
+// A service belongs to exactly one provider: a master OR a studio (CHECK constraint in manual SQL).
+model Service {
+  id            String   @id @default(cuid())
+  masterId      String?
+  studioId      String?
+  categoryId    String
+  subcategoryId String?
+  name          String
+  description   String?
+  durationMin   Int
+  bufferMin     Int      @default(0) // cleaning / rest after the service
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  master      MasterProfile? @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  studio      StudioProfile? @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  category    Category       @relation(fields: [categoryId], references: [id])
+  subcategory Subcategory?   @relation(fields: [subcategoryId], references: [id])
+  prices      ServicePrice[]
+  bookings    Booking[]
+
+  @@index([masterId, isActive])
+  @@index([studioId, isActive])
+  @@index([categoryId])
+}
+
+// Several rows per service allow multi-currency pricing. "From" prices are flagged.
+model ServicePrice {
+  id          String  @id @default(cuid())
+  serviceId   String
+  currency    String
+  amountMinor Int
+  isFrom      Boolean @default(false)
+  service     Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, currency])
+  @@index([currency, amountMinor])
+}
+
+// ───────────────────────────── Schedule ─────────────────────────────
+
+// Weekly template. Several rows per weekday = breaks between them.
+// studioId/branchId null = the master's own (private) schedule.
+model WorkingHours {
+  id          String         @id @default(cuid())
+  masterId    String
+  branchId    String?
+  weekday     Int // 0 = Monday … 6 = Sunday
+  startMinute Int // minutes from local midnight
+  endMinute   Int
+  master      MasterProfile  @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  branch      StudioBranch?  @relation(fields: [branchId], references: [id])
+
+  @@index([masterId, weekday])
+}
+
+// Date-specific exceptions on top of the weekly template (days off, extra shifts).
+model Availability {
+  id        String           @id @default(cuid())
+  masterId  String
+  type      AvailabilityType
+  startsAt  DateTime
+  endsAt    DateTime
+  note      String?
+  master    MasterProfile    @relation(fields: [masterId], references: [id], onDelete: Cascade)
+
+  @@index([masterId, startsAt])
+}
+
+// ───────────────────────────── Bookings & reviews ─────────────────────────────
+
+model Booking {
+  id            String        @id @default(cuid())
+  clientId      String
+  masterId      String
+  studioId      String?
+  branchId      String?
+  serviceId     String
+  startsAt      DateTime
+  endsAt        DateTime // includes buffer; overlap is prevented by a DB exclusion constraint
+  timezone      String // IANA zone the booking was made in (provider's city)
+  status        BookingStatus @default(PENDING)
+  priceMinor    Int
+  currency      String
+  clientName    String
+  clientPhone   String
+  clientEmail   String
+  clientNote    String?
+  cancelReason  String?
+  cancelledAt   DateTime?
+  rescheduledFromId String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  client  User           @relation("BookingClient", fields: [clientId], references: [id])
+  master  MasterProfile  @relation(fields: [masterId], references: [id])
+  studio  StudioProfile? @relation(fields: [studioId], references: [id])
+  branch  StudioBranch?  @relation(fields: [branchId], references: [id])
+  service Service        @relation(fields: [serviceId], references: [id])
+  review  Review?
+
+  @@index([masterId, startsAt])
+  @@index([studioId, startsAt])
+  @@index([clientId, startsAt])
+  @@index([status])
+}
+
+// A review requires a real COMPLETED booking; bookingId is unique => 1 review per booking.
+model Review {
+  id             String        @id @default(cuid())
+  bookingId      String        @unique
+  authorId       String
+  masterId       String
+  studioId       String?
+  rating         Int // 1..5 (CHECK in manual SQL)
+  text           String?
+  status         ReviewStatus  @default(PENDING)
+  moderationNote String?
+  createdAt      DateTime      @default(now())
+  publishedAt    DateTime?
+
+  booking Booking        @relation(fields: [bookingId], references: [id])
+  author  User           @relation(fields: [authorId], references: [id])
+  master  MasterProfile  @relation(fields: [masterId], references: [id])
+  studio  StudioProfile? @relation(fields: [studioId], references: [id])
+
+  @@index([masterId, status])
+  @@index([studioId, status])
+}
+
+model Favorite {
+  id        String         @id @default(cuid())
+  userId    String
+  masterId  String?
+  studioId  String?
+  createdAt DateTime       @default(now())
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  master    MasterProfile? @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  studio    StudioProfile? @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, masterId])
+  @@unique([userId, studioId])
+}
+
+// ───────────────────────────── Billing ─────────────────────────────
+
+// Prices are DATA, editable by Super Admin without a deploy.
+model SubscriptionPlan {
+  id                 String          @id @default(cuid())
+  code               String          @unique // "basic", "pro", "premium", "studio_base"
+  kind               PlanKind
+  name              String
+  priceMinor         Int
+  currency           String          @default("UAH")
+  interval           BillingInterval @default(MONTH)
+  seatPriceMinor     Int? // STUDIO: per active master / interval
+  connectionFeeMinor Int? // STUDIO: one-time fee for connecting a master
+  features           Json? // feature flags / limits, e.g. { "portfolioItems": 30 }
+  isActive           Boolean         @default(true)
+  sortOrder          Int             @default(0)
+  updatedAt          DateTime        @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  planId                 String
+  ownerType              SubscriberType
+  userId                 String?
+  studioId               String?
+  status                 SubscriptionStatus @default(INCOMPLETE)
+  provider               PaymentProviderCode?
+  providerSubscriptionId String?
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  nextBillingAt          DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  graceEndsAt            DateTime?
+  failedAttempts         Int                @default(0)
+  isDemo                 Boolean            @default(false) // seeded demo data, no real payment behind it
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  plan     SubscriptionPlan @relation(fields: [planId], references: [id])
+  user     User?            @relation(fields: [userId], references: [id])
+  studio   StudioProfile?   @relation(fields: [studioId], references: [id])
+  payments Payment[]
+
+  @@index([userId, status])
+  @@index([studioId, status])
+  @@index([status, nextBillingAt])
+}
+
+model Payment {
+  id                String              @id @default(cuid())
+  subscriptionId    String?
+  payerUserId       String
+  studioId          String?
+  kind              PaymentKind
+  amountMinor       Int
+  currency          String
+  status            PaymentStatus       @default(PENDING)
+  provider          PaymentProviderCode
+  providerPaymentId String?
+  idempotencyKey    String              @unique
+  lineItems         Json? // transparent breakdown shown to the payer
+  failureReason     String?
+  paidAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+  payer        User          @relation(fields: [payerUserId], references: [id])
+  studio       StudioProfile? @relation(fields: [studioId], references: [id])
+
+  @@unique([provider, providerPaymentId])
+  @@index([payerUserId, createdAt])
+  @@index([studioId, createdAt])
+  @@index([status])
+}
+
+// Only provider tokens + display metadata. Card numbers never touch our servers.
+model PaymentMethod {
+  id               String              @id @default(cuid())
+  userId           String?
+  studioId         String?
+  provider         PaymentProviderCode
+  providerMethodId String
+  brand            String?
+  last4            String?
+  expMonth         Int?
+  expYear          Int?
+  isDefault        Boolean             @default(false)
+  createdAt        DateTime            @default(now())
+
+  user   User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studio StudioProfile? @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerMethodId])
+}
+
+// Idempotency + audit for provider webhooks.
+model WebhookEvent {
+  id          String              @id @default(cuid())
+  provider    PaymentProviderCode
+  eventId     String
+  type        String
+  payload     Json
+  receivedAt  DateTime            @default(now())
+  processedAt DateTime?
+  error       String?
+
+  @@unique([provider, eventId])
+}
+
+// ───────────────────────────── Platform ─────────────────────────────
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  channel   NotificationChannel @default(IN_APP)
+  type      String // i18n key suffix, e.g. "booking.confirmed"
+  payload   Json?
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+// Super Admin editable key/value: homepage blocks, feature flags, limits.
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String // "user.block", "plan.update", "review.reject" …
+  entityType String
+  entityId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+}
