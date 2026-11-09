@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────── Design tokens (HSL triplets; used as hsl(var(--x) / alpha)) ───────── */
+:root {
+  --bg: 36 33% 97%;          /* warm ivory */
+  --surface: 0 0% 100%;
+  --muted: 30 20% 93%;
+  --border: 30 14% 86%;
+  --fg: 262 28% 12%;         /* ink */
+  --fg-muted: 262 10% 40%;
+  --brand: 262 42% 28%;      /* deep plum */
+  --brand-fg: 36 33% 97%;
+  --brand-soft: 262 40% 94%;
+  --accent: 12 78% 58%;      /* coral */
+  --accent-fg: 0 0% 100%;
+  --success: 152 55% 32%;
+  --warning: 36 90% 45%;
+  --danger: 0 68% 46%;
+  --info: 212 70% 42%;
+  color-scheme: light;
+}
+
+@layer base {
+  * { @apply border-border; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    @apply bg-bg font-sans text-fg antialiased;
+    min-height: 100dvh;
+    overflow-x: hidden; /* guard: no horizontal page scroll (also fix the offending element, never rely on this) */
+    -webkit-tap-highlight-color: transparent;
+  }
+  img, svg, video { max-width: 100%; height: auto; }
+  :focus-visible { @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-bg; }
+  /* 16px inputs prevent iOS Safari zoom-on-focus */
+  input, select, textarea { font-size: 16px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+}
+
+@layer components {
+  .h-display { @apply text-3xl font-extrabold tracking-tight sm:text-4xl lg:text-5xl; }
+  .h-section { @apply text-xl font-bold tracking-tight sm:text-2xl; }
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  /* Table → stacked cards on mobile: <table class="responsive-table"> + data-label on every <td> */
+  .responsive-table { @apply w-full text-left text-sm; }
+  @media (max-width: 767px) {
+    .responsive-table thead { @apply sr-only; }
+    .responsive-table tr { @apply mb-3 block rounded-lg border bg-surface p-3; }
+    .responsive-table td { @apply flex items-center justify-between gap-4 py-1; }
+    .responsive-table td::before { content: attr(data-label); @apply text-xs font-medium text-fg-muted; }
+  }
+}
